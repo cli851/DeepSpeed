@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.1.1-devel-ubuntu18.04
+FROM nvidia/cuda:10.2-devel-ubuntu18.04
 
 ##############################################################################
 # Temporary Installation Directory
@@ -103,7 +103,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHON_VERSION=3
 RUN apt-get install -y python3.8 python3.8-dev && \
         rm -f /usr/bin/python && \
-        ln -s /usr/bin/python3.8 /usr/bin/python3
+        ln -sf /usr/bin/python3.8 /usr/bin/python3
 
 RUN apt-get install -y language-pack-zh-hans \
     python3-pip
@@ -152,7 +152,7 @@ RUN pip3 install psutil \
         sphinx_rtd_theme \
         scipy \
         numpy \
-        sklearn \
+        # sklearn \
         scikit-learn \
         nvidia-ml-py3 \
         #mpi4py \
@@ -169,7 +169,7 @@ RUN pip3 install psutil \
 # PyTorch
 ##############################################################################
 ENV PYTORCH_VERSION=1.8.0
-ENV TORCHVISION_VERSION=0.4.0
+ENV TORCHVISION_VERSION=0.9.0
 ENV TENSORBOARDX_VERSION=1.8
 RUN pip3 install torch==${PYTORCH_VERSION}
 RUN pip3 install torchvision==${TORCHVISION_VERSION}
@@ -200,7 +200,9 @@ RUN git clone https://github.com/microsoft/DeepSpeed.git ${STAGE_DIR}/DeepSpeed
 RUN cd ${STAGE_DIR}/DeepSpeed && \
         git checkout . && \
         git checkout master && \
+        sudo ln -sf /usr/bin/pip3 /usr/bin/pip && \
+        sudo ln -sf /usr/bin/python3.8 /usr/bin/python && \
         ./install.sh --pip_sudo
-        # 用pip install deepspeed==0.7.x 或 pipinstall deepspeed==0.6.x 代替
+        # 用pip3 install deepspeed==0.7.x 或 pip3 install deepspeed==0.6.x 代替
 RUN rm -rf ${STAGE_DIR}/DeepSpeed
 RUN python3 -c "import deepspeed; print(deepspeed.__version__)"
