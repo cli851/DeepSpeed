@@ -36,28 +36,6 @@ RUN add-apt-repository ppa:git-core/ppa -y && \
         apt-get install -y git && \
         git --version
 
-##############################################################################
-# Client Liveness & Uncomment Port 22 for SSH Daemon
-##############################################################################
-# Keep SSH client alive from server side
-#设置 SSH 会话保持活跃的时间间隔为 30 秒
-RUN echo "ClientAliveInterval 30" >> /etc/ssh/sshd_config
-RUN cp /etc/ssh/sshd_config ${STAGE_DIR}/sshd_config && \
-    sed "0,/^#Port 22/s//Port 22/" ${STAGE_DIR}/sshd_config > /etc/ssh/sshd_config
-ARG SSH_PORT=22
-RUN cat /etc/ssh/sshd_config > ${STAGE_DIR}/sshd_config && \
-    echo "PasswordAuthentication no" >> ${STAGE_DIR}/sshd_config && \
-    sed "0,/^Port 22/s//Port ${SSH_PORT}/" ${STAGE_DIR}/sshd_config > /etc/ssh/sshd_config
-EXPOSE ${SSH_PORT}
-
-# ssh 免密
-RUN echo "StrictHostKeyChecking no \nUserKnownHostsFile /dev/null" >> /etc/ssh/ssh_config && \
- ssh-keygen -t rsa -f ~/.ssh/id_rsa -N "" && cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys && \
-   chmod og-wx ~/.ssh/authorized_keys
-#Set SSH config
-COPY ssh-env-config.sh /usr/local/bin/ssh-env-config.sh
-RUN chmod +x /usr/local/bin/ssh-env-config.sh
-CMD /etc/init.d/ssh start && ssh-env-config.sh /bin/bash
 
 ##############################################################################
 # Mellanox OFED
@@ -181,12 +159,12 @@ RUN pip3 install psutil \
         #mpi4py \
         cupy-cuda100
 
-##############################################################################
-## SSH daemon port inside container cannot conflict with host OS port
-###############################################################################
-ENV SSH_PORT=2222
-RUN cat /etc/ssh/sshd_config > ${STAGE_DIR}/sshd_config && \
-        sed "0,/^#Port 22/s//Port ${SSH_PORT}/" ${STAGE_DIR}/sshd_config > /etc/ssh/sshd_config
+# ##############################################################################
+# ## SSH daemon port inside container cannot conflict with host OS port
+# ###############################################################################
+# ENV SSH_PORT=2222
+# RUN cat /etc/ssh/sshd_config > ${STAGE_DIR}/sshd_config && \
+#         sed "0,/^#Port 22/s//Port ${SSH_PORT}/" ${STAGE_DIR}/sshd_config > /etc/ssh/sshd_config
 
 ##############################################################################
 # PyTorch
@@ -226,9 +204,43 @@ RUN git clone https://github.com/microsoft/DeepSpeed.git ${STAGE_DIR}/DeepSpeed
 #         sudo ln -sf /usr/bin/pip3 /usr/bin/pip && \
 #         sudo ln -sf /usr/bin/python3.8 /usr/bin/python && \
 #         ./install.sh --pip_sudo
+
+# 用pip3 install deepspeed==0.7.x 或 pip3 install deepspeed==0.6.x 代替
 RUN pip3 install deepspeed==0.7.6
-        # 用pip3 install deepspeed==0.7.x 或 pip3 install deepspeed==0.6.x 代替
+RUN sudo ln -sf /usr/bin/pip3 /usr/bin/pip && \
+        sudo ln -sf /usr/bin/python3.8 /usr/bin/python
+
 RUN rm -rf ${STAGE_DIR}/DeepSpeed
 RUN python3 -c "import deepspeed; print(deepspeed.__version__)"
-RUN mkdir /run/sshd
+
+
+
+##############################################################################
+## SSH daemon port inside container cannot conflict with host OS port
+###############################################################################
+
+#设置 SSH 会话保持活跃的时间间隔为 30 秒
+USER root
+RUN echo "ClientAliveInterval 30" >> /etc/ssh/sshd_config
+RUN cp /etc/ssh/sshd_config ${STAGE_DIR}/sshd_config && \
+    sed "0,/^#Port 22/s//Port 22/" ${STAGE_DIR}/sshd_config > /etc/ssh/sshd_config
+    
+#将容器内的ssh配置文件（/etc/ssh/sshd_config）备份到${STAGE_DIR}/sshd_config目录下，并将端口号改为22（默认端口）后再写入到ssh配置文件中，以便于在构建镜像时使用。
+ARG SSH_PORT=22
+RUN cat /etc/ssh/sshd_config > ${STAGE_DIR}/sshd_config && \
+    echo "PasswordAuthentication no" >> ${STAGE_DIR}/sshd_config && \
+    sed "0,/^Port 22/s//Port ${SSH_PORT}/" ${STAGE_DIR}/sshd_config > /etc/ssh/sshd_config
+EXPOSE ${SSH_PORT}
+
+# ssh 免密
+RUN echo "StrictHostKeyChecking no \nUserKnownHostsFile /dev/null" >> /etc/ssh/ssh_config && \
+ ssh-keygen -t rsa -f ~/.ssh/id_rsa -N "" && cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys && \
+   chmod og-wx ~/.ssh/authorized_keys
+#Set SSH config
+COPY ssh-env-config.sh /usr/local/bin/ssh-env-config.sh
+RUN chmod +x /usr/local/bin/ssh-env-config.sh
+CMD /etc/init.d/ssh start && ssh-env-config.sh /bin/bash
+
+
+RUN sudo mkdir /run/sshd
 CMD ["/usr/sbin/sshd", "-D"]
