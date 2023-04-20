@@ -40,21 +40,37 @@ RUN add-apt-repository ppa:git-core/ppa -y && \
 # Client Liveness & Uncomment Port 22 for SSH Daemon
 ##############################################################################
 # Keep SSH client alive from server side
+#设置 SSH 会话保持活跃的时间间隔为 30 秒
 RUN echo "ClientAliveInterval 30" >> /etc/ssh/sshd_config
 RUN cp /etc/ssh/sshd_config ${STAGE_DIR}/sshd_config && \
-        sed "0,/^#Port 22/s//Port 22/" ${STAGE_DIR}/sshd_config > /etc/ssh/sshd_config
+    sed "0,/^#Port 22/s//Port 22/" ${STAGE_DIR}/sshd_config > /etc/ssh/sshd_config
+ARG SSH_PORT=22
+RUN cat /etc/ssh/sshd_config > ${STAGE_DIR}/sshd_config && \
+    echo "PasswordAuthentication no" >> ${STAGE_DIR}/sshd_config && \
+    sed "0,/^Port 22/s//Port ${SSH_PORT}/" ${STAGE_DIR}/sshd_config > /etc/ssh/sshd_config
+EXPOSE ${SSH_PORT}
+
+# ssh 免密
+RUN echo "StrictHostKeyChecking no \nUserKnownHostsFile /dev/null" >> /etc/ssh/ssh_config && \
+ ssh-keygen -t rsa -f ~/.ssh/id_rsa -N "" && cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys && \
+   chmod og-wx ~/.ssh/authorized_keys
+#Set SSH config
+COPY ssh-env-config.sh /usr/local/bin/ssh-env-config.sh
+RUN chmod +x /usr/local/bin/ssh-env-config.sh
+CMD /etc/init.d/ssh start && ssh-env-config.sh /bin/bash
 
 ##############################################################################
 # Mellanox OFED
 ##############################################################################
-ENV MLNX_OFED_VERSION=4.6-1.0.1.1
-RUN apt-get install -y libnuma-dev
+RUN apt-get install -y libnuma-dev  libnuma-dev libcap2
+ENV MLNX_OFED_VERSION=5.1-2.5.8.0
+COPY MLNX_OFED_LINUX-${MLNX_OFED_VERSION}-ubuntu18.04-x86_64.tgz ${STAGE_DIR}
 RUN cd ${STAGE_DIR} && \
-        wget -q -O - http://www.mellanox.com/downloads/ofed/MLNX_OFED-${MLNX_OFED_VERSION}/MLNX_OFED_LINUX-${MLNX_OFED_VERSION}-ubuntu18.04-x86_64.tgz | tar xzf - && \
-        cd MLNX_OFED_LINUX-${MLNX_OFED_VERSION}-ubuntu18.04-x86_64 && \
-        ./mlnxofedinstall --user-space-only --without-fw-update --all -q && \
-        cd ${STAGE_DIR} && \
-        rm -rf ${STAGE_DIR}/MLNX_OFED_LINUX-${MLNX_OFED_VERSION}-ubuntu18.04-x86_64*
+    tar xvfz MLNX_OFED_LINUX-${MLNX_OFED_VERSION}-ubuntu18.04-x86_64.tgz && \
+    cd MLNX_OFED_LINUX-${MLNX_OFED_VERSION}-ubuntu18.04-x86_64 && \
+    PATH=/usr/bin:$PATH ./mlnxofedinstall --user-space-only --without-fw-update --umad-dev-rw --all -q && \
+    cd ${STAGE_DIR} && \
+    rm -rf ${STAGE_DIR}/MLNX_OFED_LINUX-${MLNX_OFED_VERSION}-ubuntu18.04-x86_64*
 
 ##############################################################################
 # nv_peer_mem
@@ -77,24 +93,31 @@ RUN mkdir -p ${STAGE_DIR} && \
 # OPENMPI
 ##############################################################################
 ENV OPENMPI_BASEVERSION=4.0
-ENV OPENMPI_VERSION=${OPENMPI_BASEVERSION}.1
+ENV OPENMPI_VERSION=${OPENMPI_BASEVERSION}.5
+COPY openmpi-4.0.5.tar.gz  ${STAGE_DIR}
+COPY libevent-2.0.22-stable.tar.gz  ${STAGE_DIR}
 RUN cd ${STAGE_DIR} && \
-        wget -q -O - https://download.open-mpi.org/release/open-mpi/v${OPENMPI_BASEVERSION}/openmpi-${OPENMPI_VERSION}.tar.gz | tar xzf - && \
-        cd openmpi-${OPENMPI_VERSION} && \
-        ./configure --prefix=/usr/local/openmpi-${OPENMPI_VERSION} && \
-        make -j"$(nproc)" install && \
-        ln -s /usr/local/openmpi-${OPENMPI_VERSION} /usr/local/mpi && \
-        # Sanity check:
-        test -f /usr/local/mpi/bin/mpic++ && \
-        cd ${STAGE_DIR} && \
-        rm -r ${STAGE_DIR}/openmpi-${OPENMPI_VERSION}
+    tar -zxvf libevent-2.0.22-stable.tar.gz && \
+    cd libevent-2.0.22-stable && \
+    ./configure --prefix=/usr && \
+    make && make install
+RUN cd ${STAGE_DIR} && \
+    tar --no-same-owner -xzf openmpi-4.0.5.tar.gz && \
+    cd openmpi-${OPENMPI_VERSION} && \
+    ./configure --prefix=/usr/local/openmpi-${OPENMPI_VERSION} && \
+    make -j"$(nproc)" install  && \
+    ln -s /usr/local/openmpi-${OPENMPI_VERSION} /usr/local/mpi && \
+    #Sanity check:
+    test -f /usr/local/mpi/bin/mpic++ && \
+    cd ${STAGE_DIR} && \
+    rm -r ${STAGE_DIR}/openmpi-${OPENMPI_VERSION}
 ENV PATH=/usr/local/mpi/bin:${PATH} \
-        LD_LIBRARY_PATH=/usr/local/lib:/usr/local/mpi/lib:/usr/local/mpi/lib64:${LD_LIBRARY_PATH}
-# Create a wrapper for OpenMPI to allow running as root by default
+    LD_LIBRARY_PATH=/usr/local/lib:/usr/local/mpi/lib:/usr/local/mpi/lib64:${LD_LIBRARY_PATH}
+#Create a wrapper for OpenMPI to allow running as root by default
 RUN mv /usr/local/mpi/bin/mpirun /usr/local/mpi/bin/mpirun.real && \
-        echo '#!/bin/bash' > /usr/local/mpi/bin/mpirun && \
-        echo 'mpirun.real --allow-run-as-root --prefix /usr/local/mpi "$@"' >> /usr/local/mpi/bin/mpirun && \
-        chmod a+x /usr/local/mpi/bin/mpirun
+    echo '#!/bin/bash' > /usr/local/mpi/bin/mpirun && \
+    echo 'mpirun.real --allow-run-as-root --prefix /usr/local/mpi "$@"' >> /usr/local/mpi/bin/mpirun && \
+    chmod a+x /usr/local/mpi/bin/mpirun
 
 ##############################################################################
 # Python
@@ -197,12 +220,15 @@ USER deepspeed
 # DeepSpeed
 ##############################################################################
 RUN git clone https://github.com/microsoft/DeepSpeed.git ${STAGE_DIR}/DeepSpeed
-RUN cd ${STAGE_DIR}/DeepSpeed && \
-        git checkout . && \
-        git checkout master && \
-        sudo ln -sf /usr/bin/pip3 /usr/bin/pip && \
-        sudo ln -sf /usr/bin/python3.8 /usr/bin/python && \
-        ./install.sh --pip_sudo
+# RUN cd ${STAGE_DIR}/DeepSpeed && \
+#         git checkout . && \
+#         git checkout master && \
+#         sudo ln -sf /usr/bin/pip3 /usr/bin/pip && \
+#         sudo ln -sf /usr/bin/python3.8 /usr/bin/python && \
+#         ./install.sh --pip_sudo
+RUN pip3 install deepspeed==0.7.6
         # 用pip3 install deepspeed==0.7.x 或 pip3 install deepspeed==0.6.x 代替
 RUN rm -rf ${STAGE_DIR}/DeepSpeed
 RUN python3 -c "import deepspeed; print(deepspeed.__version__)"
+RUN mkdir /run/sshd
+CMD ["/usr/sbin/sshd", "-D"]
