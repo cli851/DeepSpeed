@@ -197,6 +197,8 @@ USER deepspeed
 ##############################################################################
 # DeepSpeed
 ##############################################################################
+# USER deepspeed好像行不通
+USER root
 RUN git clone https://github.com/microsoft/DeepSpeed.git ${STAGE_DIR}/DeepSpeed
 # RUN cd ${STAGE_DIR}/DeepSpeed && \
 #         git checkout . && \
@@ -220,7 +222,6 @@ RUN python3 -c "import deepspeed; print(deepspeed.__version__)"
 ###############################################################################
 
 #设置 SSH 会话保持活跃的时间间隔为 30 秒
-USER root
 RUN echo "ClientAliveInterval 30" >> /etc/ssh/sshd_config
 RUN cp /etc/ssh/sshd_config ${STAGE_DIR}/sshd_config && \
     sed "0,/^#Port 22/s//Port 22/" ${STAGE_DIR}/sshd_config > /etc/ssh/sshd_config
